@@ -4,21 +4,16 @@ import re
 import markdown
 import os
 import cgi
-import urllib
+import urllib.request, urllib.parse, urllib.error
 import time
 import functools
 import logging
+import binascii
 
 from flask import Flask, render_template, request, make_response, session, Response
-import sys
-if sys.version_info.major < 3:
-    reload(sys)
-sys.setdefaultencoding('utf8')
-
 from ideone import Ideone
 
 import constants
-
 
 courses = json.load(open("courses.json"))
 
@@ -40,7 +35,7 @@ if __name__ == '__main__':
         help="Default domain when running in development mode",
         default=constants.LEARNPYTHON_DOMAIN,
         required=True,
-        choices=constants.DOMAIN_DATA.keys()
+        choices=list(constants.DOMAIN_DATA.keys())
     )
 
     parser.add_argument("-p", "--port", help="port to listen to", default=5000, type=int)
@@ -98,7 +93,7 @@ def pageurl(value, language):
     if value.startswith("http"):
         return value
     else:
-        return urllib.quote("/%s/%s" % (language, value.replace(' ', '_')))
+        return urllib.parse.quote("/%s/%s" % (language, value.replace(' ', '_')))
 
 
 def _wikify_one(language, pat):
@@ -123,7 +118,7 @@ def _wikify_one(language, pat):
 
 def wikify(text, language):
     text, count = WIKI_WORD_PATTERN.subn(functools.partial(_wikify_one, language), text)
-    return markdown.markdown(text.decode("utf-8")).strip()
+    return markdown.markdown(text).strip()
 
 
 def untab(text):
@@ -147,7 +142,7 @@ def init_tutorials():
             continue
 
         if domain not in constants.DOMAIN_DATA:
-            logging.warn("skipping domain %s beacause no domain data exists" % domain)
+            logging.warning("skipping domain %s beacause no domain data exists" % domain)
             continue
 
         for language in os.listdir(os.path.join(os.path.dirname(__file__), "tutorials", domain)):
@@ -176,7 +171,7 @@ def init_tutorials():
 
                 try:
                     tutorial_dict["text"] = open(os.path.join(os.path.dirname(__file__), "tutorials", domain, language, tutorial_file)).read().replace("\r\n", "\n")
-                except Exception, e:
+                except Exception as e:
                     tutorial_dict["text"] = "There was an error reading the tutorial. Exception: %s" % e.message
 
                 # create links by looking at all lines that are not code lines
@@ -187,7 +182,7 @@ def init_tutorials():
                 tutorial_sections = sections.findall(tutorial_dict["text"])
                 if tutorial_sections:
                     text, code, output, solution = tutorial_sections[0]
-                    tutorial_dict["page_title"] = tutorial.decode("utf8")
+                    tutorial_dict["page_title"] = tutorial
                     tutorial_dict["text"] = wikify(text, language)
                     tutorial_dict["code"] = untab(code)
                     tutorial_dict["output"] = untab(output)
@@ -202,13 +197,13 @@ def init_tutorials():
                 for link in links:
                     if not link in tutorial_data[domain][language]:
                         tutorial_data[domain][language][link] = {
-                            "page_title" : link.decode("utf8"),
+                            "page_title" : link,
                             "text": contributing_tutorials,
                             "code": ""
                         }
 
                     if not "back_chapter" in tutorial_data[domain][language][link]:
-                        tutorial_data[domain][language][link]["back_chapter"] = tutorial.decode("utf-8").replace(" ", "_")
+                        tutorial_data[domain][language][link]["back_chapter"] = tutorial.replace(" ", "_")
                     elif not link.startswith("http"):
                         logging.info("Warning! duplicate links to tutorial %s from tutorial %s/%s", link, language, tutorial)
 
@@ -216,10 +211,10 @@ def init_tutorials():
                     page_index = links.index(link)
                     if page_index > 0:
                         if not "previous_chapter" in tutorial_data[domain][language][link]:
-                            tutorial_data[domain][language][link]["previous_chapter"] = links[page_index - 1].decode("utf-8").replace(" ", "_")
+                            tutorial_data[domain][language][link]["previous_chapter"] = links[page_index - 1].replace(" ", "_")
                     if page_index < (num_links - 1):
                         if not "next_chapter" in tutorial_data[domain][language][link]:
-                            tutorial_data[domain][language][link]["next_chapter"] = links[page_index + 1].decode("utf-8").replace(" ", "_")
+                            tutorial_data[domain][language][link]["next_chapter"] = links[page_index + 1].replace(" ", "_")
 
 
 init_tutorials()
@@ -349,7 +344,7 @@ def progress(language):
 @app.route("/<title>", methods=["GET", "POST"])
 @app.route("/<language>/<title>", methods=["GET", "POST"])
 def index(title, language="en"):
-    tutorial = title.replace("_", " ").encode("utf-8")
+    tutorial = title.replace("_", " ")
     try:
         current_tutorial_data = get_tutorial(tutorial, language)
     except KeyError:
@@ -362,13 +357,13 @@ def index(title, language="en"):
         html_title = "%s - %s" % (title.replace("_", " "), title_suffix) if title != "Welcome" else title_suffix
 
         if not "uid" in session:
-            session["uid"] = os.urandom(16).encode("hex")
+            session["uid"] = binascii.b2a_hex(os.urandom(16))
 
         uid = session["uid"]
 
         try:
             site_links = tutorial_data[get_host()][language]["Welcome"]["links"]
-        except Exception, e:
+        except Exception as e:
             site_links = []
             logging.error("cant get site links for %s %s" % (get_host(), language))
 
